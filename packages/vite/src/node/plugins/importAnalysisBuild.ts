@@ -41,6 +41,7 @@ function detectScriptRel() {
 }
 
 declare const scriptRel: string
+declare const createdDepLinks: Record<string, HTMLLinkElement>
 function preload(baseModule: () => Promise<{}>, deps?: string[]) {
   // @ts-ignore
   if (!__VITE_IS_MODERN__ || !deps || deps.length === 0) {
@@ -51,27 +52,41 @@ function preload(baseModule: () => Promise<{}>, deps?: string[]) {
     deps.map((dep) => {
       // @ts-ignore
       dep = `${base}${dep}`
-      // @ts-ignore
-      if (dep in seen) return
-      // @ts-ignore
-      seen[dep] = true
       const isCss = dep.endsWith('.css')
-      const cssSelector = isCss ? '[rel="stylesheet"]' : ''
-      // @ts-ignore check if the file is already preloaded by SSR markup
-      if (document.querySelector(`link[href="${dep}"]${cssSelector}`)) {
-        return
+
+      const generateOrGetLink = (): HTMLLinkElement => {
+        const cssSelector = isCss ? '[rel="stylesheet"]' : ''
+        // @ts-ignore check if the file is already preloaded by SSR markup
+        const ssrLink = document.querySelector<HTMLLinkElement>(
+          `link[href="${dep}"]${cssSelector}`
+        )
+        if (ssrLink) {
+          return ssrLink
+        }
+        // @ts-ignore
+        const link = document.createElement('link')
+        // @ts-ignore
+        link.rel = isCss ? 'stylesheet' : scriptRel
+        if (!isCss) {
+          link.as = 'script'
+          link.crossOrigin = ''
+        }
+        link.href = dep
+
+        // @ts-ignore
+        document.head.appendChild(link)
+
+        return link
       }
-      // @ts-ignore
-      const link = document.createElement('link')
-      // @ts-ignore
-      link.rel = isCss ? 'stylesheet' : scriptRel
-      if (!isCss) {
-        link.as = 'script'
-        link.crossOrigin = ''
+
+      let link: HTMLLinkElement
+      if (dep in createdDepLinks) {
+        link = createdDepLinks[dep]
+      } else {
+        link = generateOrGetLink()
+        createdDepLinks[dep] = link
       }
-      link.href = dep
-      // @ts-ignore
-      document.head.appendChild(link)
+
       if (isCss) {
         return new Promise((res, rej) => {
           link.addEventListener('load', res)
@@ -95,7 +110,7 @@ export function buildImportAnalysisPlugin(config: ResolvedConfig): Plugin {
   const scriptRel = config.build.polyfillModulePreload
     ? `'modulepreload'`
     : `(${detectScriptRel.toString()})()`
-  const preloadCode = `const scriptRel = ${scriptRel};const seen = {};const base = '${preloadBaseMarker}';export const ${preloadMethod} = ${preload.toString()}`
+  const preloadCode = `const scriptRel = ${scriptRel};const createdDepLinks = {};const base = '${preloadBaseMarker}';export const ${preloadMethod} = ${preload.toString()}`
   const resolve = config.createResolver({
     preferRelative: true,
     tryIndex: false,
