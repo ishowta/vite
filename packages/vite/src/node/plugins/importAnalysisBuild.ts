@@ -55,6 +55,7 @@ function detectScriptRel() {
 }
 
 declare const scriptRel: string
+declare const createdDepLinks: Record<string, HTMLLinkElement>
 function preload(
   baseModule: () => Promise<{}>,
   deps?: string[],
@@ -69,27 +70,41 @@ function preload(
     deps.map((dep) => {
       // @ts-ignore
       dep = assetsURL(dep, importerUrl)
-      // @ts-ignore
-      if (dep in seen) return
-      // @ts-ignore
-      seen[dep] = true
       const isCss = dep.endsWith('.css')
-      const cssSelector = isCss ? '[rel="stylesheet"]' : ''
-      // @ts-ignore check if the file is already preloaded by SSR markup
-      if (document.querySelector(`link[href="${dep}"]${cssSelector}`)) {
-        return
+
+      const generateOrGetLink = (): HTMLLinkElement => {
+        const cssSelector = isCss ? '[rel="stylesheet"]' : ''
+        // @ts-ignore check if the file is already preloaded by SSR markup
+        const ssrLink = document.querySelector<HTMLLinkElement>(
+          `link[href="${dep}"]${cssSelector}`
+        )
+        if (ssrLink) {
+          return ssrLink
+        }
+        // @ts-ignore
+        const link = document.createElement('link')
+        // @ts-ignore
+        link.rel = isCss ? 'stylesheet' : scriptRel
+        if (!isCss) {
+          link.as = 'script'
+          link.crossOrigin = ''
+        }
+        link.href = dep
+
+        // @ts-ignore
+        document.head.appendChild(link)
+
+        return link
       }
-      // @ts-ignore
-      const link = document.createElement('link')
-      // @ts-ignore
-      link.rel = isCss ? 'stylesheet' : scriptRel
-      if (!isCss) {
-        link.as = 'script'
-        link.crossOrigin = ''
+
+      let link: HTMLLinkElement
+      if (dep in createdDepLinks) {
+        link = createdDepLinks[dep]
+      } else {
+        link = generateOrGetLink()
+        createdDepLinks[dep] = link
       }
-      link.href = dep
-      // @ts-ignore
-      document.head.appendChild(link)
+
       if (isCss) {
         return new Promise((res, rej) => {
           link.addEventListener('load', res)
@@ -118,7 +133,7 @@ export function buildImportAnalysisPlugin(config: ResolvedConfig): Plugin {
   const assetsURL = relativeBase
     ? `function(dep,importerUrl) { return new URL(dep, importerUrl).href }`
     : `function(dep) { return ${JSON.stringify(config.base)}+dep }`
-  const preloadCode = `const scriptRel = ${scriptRel};const assetsURL = ${assetsURL};const seen = {};export const ${preloadMethod} = ${preload.toString()}`
+  const preloadCode = `const scriptRel = ${scriptRel};const assetsURL = ${assetsURL};const createdDepLinks = {};export const ${preloadMethod} = ${preload.toString()}`
 
   return {
     name: 'vite:build-import-analysis',
